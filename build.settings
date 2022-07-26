@@ -1,6 +1,9 @@
 settings =
 {
 	plugins = {
-		["plugin.memoryBitmap"] = { publisherId = "com.coronalabs" }
+    ["plugin.Bytemap"] = { publisherId = "com.xibalbastudios" },
+    ["plugin.impack"] = { publisherId = "com.xibalbastudios" },
+		["plugin.memoryBitmap"] = { publisherId = "com.coronalabs" },
+    ["plugin.tinyfiledialogs"] = { publisherId = "com.xibalbastudios" }
 	}
 }

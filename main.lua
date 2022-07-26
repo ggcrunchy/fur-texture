@@ -26,6 +26,7 @@
 -- Standard library imports --
 local abs = math.abs
 local asin = math.asin
+local char = string.char
 local floor = math.floor
 local ipairs = ipairs
 local max = math.max
@@ -40,7 +41,10 @@ local sqrt = math.sqrt
 local widget = require("widget")
 
 -- Plugins --
+local Bytemap = require("plugin.Bytemap")
+local impack = require("plugin.impack")
 local memoryBitmap = require("plugin.memoryBitmap")
+local tinyfiledialogs = require("plugin.tinyfiledialogs")
 
 -- Solar2D globals --
 local display = display
@@ -245,35 +249,56 @@ display.setDefault("minTextureFilter", "linear")
 
 local FullRange = EncodeTimes{ 0, 15 }
 
-local function BakeLayers (layers)
+local ShowImage3
+
+local function GetAlpha (alpha, ar, ag, ab)
+  local c3 = alpha
+  local c2 = .8725 * ar
+  local c1 = .8875 * ag
+  local c0 = .8225 * ab
+  local w1 = 1 - ab
+  local w2 = w1 * (1 - ag)
+  local w3 = w2 * (1 - ar)
+
+  return c0 + w1 * c1 + w2 * c2 + w3 * c3
+end
+
+local function BakeLayers (layers, out, save)
+  out = out or Tex2
+  
   local r, g, b, a, index = layers[1], layers[2], layers[3], layers[4], 1
 
-  for row = 1, NRows do
-    for col = 1, NCols do
+  for row = 1, out.height do
+    for col = 1, out.width do
       local red, green, blue, alpha = EncodeTimes(r[index]), EncodeTimes(g[index]), EncodeTimes(b[index]), a[index] or 0
+      local ar, ag, ab = 0, 0, 0
 
       -- If a pixel is shown at all times, just bake it into the skin instead; this will
       -- be the case at all the follicles, for instance. This gives us some slack in the
       -- encoding and seems to avoid some artifacts, presumably related to rounding.
       if red == FullRange then
-        alpha, red = .325, 0--alpha + .25 * .125, 0
+        ar, red = .525, 0--alpha + .25 * .125, 0
       end
 
       if green == FullRange then
-        alpha, green = .375, 0--alpha + .25 * .375, 0
+        ag, green = .675, 0--alpha + .25 * .375, 0
       end
 
       if blue == FullRange then
-        alpha, blue = .425, 0--alpha + .25 * .25, 0
+        ab, blue = .825, 0--alpha + .25 * .25, 0
       end
 
-      Tex2:setPixel(col, row, red, green, blue, alpha)
+      alpha = GetAlpha(alpha, ar, ag, ab) 
+
+      out:setPixel(col, row, red, green, blue, alpha)
       
       index = index + 1
     end
   end
 
-  Tex2:invalidate()
+  out:invalidate()
+
+  ShowImage3(out, save)
 end
 
 --
@@ -323,13 +348,13 @@ local function GetAngle (vx, vy, vz, wx, wy, wz)
 end
 
 local function RandomAxis ()
-  local ax, ay, az = random(-20, 0) / 50, random(0, 20) / 50, random(30, 50) / 50
+  local ax, ay, az = random(-20, 20) / 50, random(0, 20) / 50, random(30, 50) / 50
   local alen = Length(ax, ay, az)
 
   return ax / alen, ay / alen, az / alen
 end
 
-local SegmentLength = 14.5--1.5
+local SegmentLength = 2.5--14.5
 
 local function RenderSegment (layer, time, x1, y1, vx, vy)
   local x2, y2 = x1 + vx * SegmentLength, y1 + vy * SegmentLength
@@ -343,8 +368,6 @@ end
 --
 --
 
-local Densities = { 9, 6, 7 }--20, 15, 20 }
-
 local function GetAxes () -- can add angle limit and constrain w 
   local vx, vy, vz = RandomAxis()
   local wx, wy, wz = RandomAxis()
@@ -355,6 +378,39 @@ local function GetAxes () -- can add angle limit and constrain w
   wx, wy = wx / sina, wy / sina
 
   return angle, vx, vy, wx, wy
+end
+
+local function TryToPopulateCell (layer, density, row, col)
+  if random(100) < density then
+    local n, angle, vx, vy, wx, wy = random(2, 6), GetAxes()
+
+    for j = 0, 15 do
+      local t, x, y = j / 16, col * CellWidth, row * CellHeight
+
+      for _ = 1, n do
+        x, y = RenderSegment(layer, j, x, y, Slerp(vx, vy, wx, wy, angle, t))
+        t = random(j * 2, j * 3 + 5) / 50 -- slightly shifted
+      end
+    end
+  end
+end
+
+--
+--
+--
+
+local Densities = { 20, 15, 20 }
+
+--
+--
+--
+
+local function PopulateLayerFromEdges (layer, density)
+  for row, edges in pairs(RowInfo) do
+    for col = edges.left, edges.right do
+      TryToPopulateCell(layer, density, row, col)
+    end
+  end
 end
 
 widget.newButton{
@@ -370,7 +426,7 @@ widget.newButton{
         local r0 = (row - 1) * NCols
 
         for col = edges.left, edges.right do
-          alayer[r0 + col] = .25
+          alayer[r0 + col] = 1
         end
       end
 
@@ -379,22 +435,7 @@ widget.newButton{
       for _, density in ipairs(Densities) do
         local layer = {}
 
-        for row, edges in pairs(RowInfo) do
-          for col = edges.left, edges.right do
-            if random(100) < density then
-              local n, angle, vx, vy, wx, wy = random(2, 6), GetAxes()
-
-              for j = 0, 15 do
-                local t, x, y = j / 16, col * CellWidth, row * CellHeight
-
-                for _ = 1, n do
-                  x, y = RenderSegment(layer, j, x, y, Slerp(vx, vy, wx, wy, angle, t))
-                  t = random(j * 2, j * 3 + 5) / 50 -- slightly shifted
-                end
-              end
-            end
-          end
-        end
+        PopulateLayerFromEdges(layer, density)
     
         layers[#layers + 1] = layer
       end
@@ -402,6 +443,75 @@ widget.newButton{
       layers[#layers + 1] = alayer
 
       BakeLayers(layers)
+    end
+  end
+}
+
+--
+--
+--
+
+local AlphaCutoff = 15 -- out of 255
+
+widget.newButton{
+  left = Image.contentBounds.xMax + 20,
+  top = Image.contentBounds.yMin + 50,
+  label = "From File",
+
+  onEvent = function(event)
+    if event.phase == "ended" then
+      local filename = tinyfiledialogs.openFileDialog{
+				title = "Open shape image", default_path_and_file = system.pathForFile("Images/"),
+				filter_patterns = { "*.png", ".PNG" }, -- may also be an array, cf. next button
+				filter_description = "PNG" -- name that can substitute for patterns
+			}
+
+			if filename then
+        local bmap = Bytemap.loadTexture{ filename = filename, is_absolute = true }
+        local w, h, data = bmap.width, bmap.height, bmap:GetBytes{ format = "alpha" }
+        local alayer, index = {}, 1
+
+        for alpha in data:gmatch(".") do
+          if alpha:byte() > AlphaCutoff then
+            alayer[index] = 1
+          end
+
+          index = index + 1
+        end
+
+        local layers = {}
+        local cw, ch, nc, nr = CellWidth, CellHeight, NCols, NRows
+
+        CellHeight, CellWidth, NCols, NRows = 1, 1, w, h
+
+        for _, density in ipairs(Densities) do
+          local layer, row, col = {}, 1, 1
+
+          for alpha in data:gmatch(".") do
+            if alpha:byte() > AlphaCutoff then
+              TryToPopulateCell(layer, density, row, col)
+            end
+            
+            if col < w then
+              col = col + 1
+            else
+              row, col = row + 1, 1
+            end
+          end
+
+          layers[#layers + 1] = layer
+        end
+
+        layers[#layers + 1] = alayer
+
+        local out = memoryBitmap.newTexture{ width = w, height = h }
+
+        BakeLayers(layers, out, true)
+
+        CellWidth, CellHeight, NCols, NRows = cw, ch, nc, nr
+
+        bmap:releaseSelf()
+      end
     end
   end
 }
@@ -452,17 +562,25 @@ graphics.defineEffect{
 
       // Accumulate the tint for any valid component. This is not an especially fancy
       // blending policy, but always-visible pixels are easy, cf. BakeLayers() above.
-      P_COLOR float fur_tint = rgba.a;//
-    //  dot(bounded, vec3(.125, .375, .25));
-    //  P_COLOR vec4 gray = vec4(rgba.a);
-      P_COLOR float ff = fur_tint;//vec4(rgba.a + fur_tint);
-ff = max(ff, .625 * bounded.r);
-ff = max(ff, .875 * bounded.g);
-ff = max(ff, .925 * bounded.b);
+      P_COLOR float alpha3 = sign(rgba.a);
+      P_COLOR float alpha2 = bounded.r * .525;
+      P_COLOR float alpha1 = bounded.g * .675;
+      P_COLOR float alpha0 = bounded.b * .825;
 
-P_COLOR vec4 gray = vec4(ff);
+      P_COLOR float color3 = rgba.a * alpha3;
+      P_COLOR float color2 = .8725 * alpha2;
+      P_COLOR float color1 = .8875 * alpha1;
+      P_COLOR float color0 = .8225 * alpha0;
+
+      P_COLOR float w1 = 1. - alpha0;
+      P_COLOR float w2 = w1 * (1. - alpha1);
+      P_COLOR float w3 = w2 * (1. - alpha2);
+
+      P_COLOR float asum = alpha0 + w1 * alpha1 + w2 * alpha2 + w3 * alpha3;
+      P_COLOR float csum = color0 + w1 * color1 + w2 * color2 + w3 * color3;
+
       // Tint the final grayscale value. If the pixel was hidden, clear anything done.
-      return CoronaColorScale(gray) * (1. - blank);
+      return CoronaColorScale(vec4(vec3(csum), asum)) * (1. - blank);
     }
   ]]
 }
@@ -471,18 +589,40 @@ P_COLOR vec4 gray = vec4(ff);
 --
 --
 
-local Image3 = display.newImageRect(Tex2.filename, Tex2.baseDir, 300, 300)
+function ShowImage3 (out, save)
+  if save then
+    local bmap = Bytemap.newTexture{ width = out.width, height = out.height, is_non_external = true }
+    local opts = {}
 
-Image3.fill.effect = "filter.custom.fur"
+    for y = 1, out.height do
+      opts.y1, opts.y2 = y, y
 
-Image3:setStrokeColor(0, 1, 0)
+      for x = 1, out.width do
+        opts.x1, opts.x2 = x, x
 
-Image3.anchorX, Image3.x = 0, Left
-Image3.anchorY, Image3.y = 0, Top + 700
-Image3.strokeWidth = 2
+        local r, g, b, a = out:getPixel(x, y)
 
-Image3:setFillColor(.7, .3, .2) -- vair
+        bmap:SetBytes(char(floor(r * 255 + .5), floor(g * 255 + .5), floor(b * 255 + .5), floor(a * 255 + .5)), opts)
+      end
+    end
 
-transition.to(Image3.fill.effect, { t1 = 1, time = 1300, transition = easing.continuousLoop, iterations = 0 })
-transition.to(Image3.fill.effect, { t2 = 1, time = 2300, transition = easing.continuousLoop, iterations = 0 })
-transition.to(Image3.fill.effect, { t3 = 1, time = 1300, transition = easing.continuousLoop, iterations = 0 })
+    impack.write.png("Out.png", out.width, out.height, 4, bmap:GetBytes())
+
+    bmap:releaseSelf()
+  end
+
+  local Image3 = display.newImageRect(out.filename, out.baseDir, 300, 300)
+
+  Image3.anchorX, Image3.x = 0, Left
+  Image3.anchorY, Image3.y = 0, Top + 700
+
+  Image3:setFillColor(.7, .3, .2) -- vair
+  Image3:setStrokeColor(0, 1, 0)
+
+  Image3.fill.effect = "filter.custom.fur"
+  Image3.strokeWidth = 2
+
+  transition.to(Image3.fill.effect, { t1 = 1, time = 1300, transition = easing.continuousLoop, iterations = 0 })
+  transition.to(Image3.fill.effect, { t2 = 1, time = 2300, transition = easing.continuousLoop, iterations = 0 })
+  transition.to(Image3.fill.effect, { t3 = 1, time = 1300, transition = easing.continuousLoop, iterations = 0 })
+end
