@@ -12,6 +12,6 @@ Needless to say this is rather lossy, but with suitable constraints on the hairs
 A description of the current state (and a brief video) may be found [here](https://forums.solar2d.com/t/fur-take-two/354724)
 and a previous effort is [here](https://forums.solar2d.com/t/fur-foliage-wip/343798).
 
-=====================
+---
 
 The "separated" module was an experiment but so far looks to be a dud.
