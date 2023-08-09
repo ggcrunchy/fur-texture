@@ -1,4 +1,4 @@
---- Fur test.
+--- Fur test, as geometry.
 
 --
 -- Permission is hereby granted, free of charge, to any person obtaining
@@ -23,10 +23,6 @@
 -- [ MIT license: http://www.opensource.org/licenses/mit-license.php ]
 --
 
-require("geometry1")
-
-do return end
-
 -- Standard library imports --
 local abs = math.abs
 local asin = math.asin
@@ -48,6 +44,12 @@ local memoryBitmap = require("plugin.memoryBitmap")
 
 -- Solar2D globals --
 local display = display
+
+--
+--
+--
+
+display.setDefault("background", .275)
 
 --
 --
@@ -202,88 +204,6 @@ end)
 --
 --
 
-local function UpdateTimeInfo (col, row, layer, time)
-  local index = (row - 1) * NCols + col
-  local value = layer[index]
-
-  if value then
-    value[1], value[2] = min(value[1], time), max(value[2], time)
-  else
-    value = { time, time }
-  end
-
-  layer[index] = value
-end
-
-local function EncodeTimes (value)
-  if value then
-    local low = value[1]
-    local range = value[2] - low + 1
-
-    return (16 * low + range + 1) / 256 -- we add 1 to as a correction from 256ths to 255ths
-  else
-    return 0
-  end
-end
-
---
---
---
-
--- In early development, this looked atrocious with filtering. Now it
--- actually seems okay, if still off. The "low" value might often survive,
--- or at least be reasonably close, whereas the "range" will be all over
--- the place.
-
-display.setDefault("magTextureFilter", "nearest")
-display.setDefault("minTextureFilter", "nearest")
-
-local Tex2 = memoryBitmap.newTexture{ width = NCols, height = NRows }
-
-display.setDefault("magTextureFilter", "linear")
-display.setDefault("minTextureFilter", "linear")
-
---
---
---
-
-local FullRange = EncodeTimes{ 0, 15 }
-
-local function BakeLayers (layers)
-  local r, g, b, a, index = layers[1], layers[2], layers[3], layers[4], 1
-
-  for row = 1, NRows do
-    for col = 1, NCols do
-      local red, green, blue, alpha = EncodeTimes(r[index]), EncodeTimes(g[index]), EncodeTimes(b[index]), a[index] or 0
-
-      -- If a pixel is shown at all times, just bake it into the skin instead; this will
-      -- be the case at all the follicles, for instance. This gives us some slack in the
-      -- encoding and seems to avoid some artifacts, presumably related to rounding.
-      if red == FullRange then
-        alpha, red = .325, 0--alpha + .25 * .125, 0
-      end
-
-      if green == FullRange then
-        alpha, green = .375, 0--alpha + .25 * .375, 0
-      end
-
-      if blue == FullRange then
-        alpha, blue = .425, 0--alpha + .25 * .25, 0
-      end
-
-      Tex2:setPixel(col, row, red, green, blue, alpha)
-      
-      index = index + 1
-    end
-  end
-
-  Tex2:invalidate()
-end
-
---
---
---
-
 -- For the following, see http://www.plunk.org/~hatch/rightway.html
 
 local function AngleBetween (dot, vmw, vpw)
@@ -295,7 +215,7 @@ local function AngleBetween (dot, vmw, vpw)
 end
 
 local function SinXOverX (x)
-  if 1 + x^2 == 1 then
+  if 1 + x * x == 1 then
     return 1
   else
     return sin(x) / x
@@ -315,7 +235,7 @@ end
 --
 
 local function Length (vx, vy, vz)
-  return sqrt(vx^2 + vy^2 + vz^2)
+  return sqrt(vx * vx + vy * vy + vz * vz)
 end
 
 local function GetAngle (vx, vy, vz, wx, wy, wz)
@@ -326,33 +246,33 @@ local function GetAngle (vx, vy, vz, wx, wy, wz)
   return AngleBetween(dot, vmw, vpw)
 end
 
-local function RandomAxis ()
-  local ax, ay, az = random(-20, 0) / 50, random(0, 20) / 50, random(30, 50) / 50
+local function RandomAxis (c, l, r)
+  local ax, ay, az = random(-40, 40) / 50, random(-40, 40) / 50, random(30, 50) / 50
+  
+  if c then
+    ax = (c + random(-3, 3) - (l + r) / 2) / (r - l)
+  end
+  
   local alen = Length(ax, ay, az)
 
   return ax / alen, ay / alen, az / alen
 end
 
-local SegmentLength = 14.5--1.5
-
-local function RenderSegment (layer, time, x1, y1, vx, vy)
-  local x2, y2 = x1 + vx * SegmentLength, y1 + vy * SegmentLength
-
-  Raycast(x1, y1, x2, y2, UpdateTimeInfo, layer, time)
-
-  return x2, y2
-end
-
 --
 --
 --
 
-local Densities = { 9, 6, 7 }--20, 15, 20 }
+local Densities = { 80, 75, 90 }
 
-local function GetAxes () -- can add angle limit and constrain w 
-  local vx, vy, vz = RandomAxis()
+local function GetAxes (c, l, r) -- can add angle limit and constrain w 
+  local vx, vy, vz = RandomAxis(c, l, r)
   local wx, wy, wz = RandomAxis()
   local angle = GetAngle(vx, vy, vz, wx, wy, wz)
+
+  if abs(angle) < pi / 8 then
+    return GetAxes(c, l, r)
+  end
+
   local sina = SinXOverX(angle)
 
   vx, vy = vx / sina, vy / sina
@@ -361,6 +281,10 @@ local function GetAxes () -- can add angle limit and constrain w
   return angle, vx, vy, wx, wy
 end
 
+local WW = 5
+
+local Hairs = {}
+
 widget.newButton{
   left = Image.contentBounds.xMax + 20,
   top = Image.contentBounds.yMin,
@@ -368,125 +292,118 @@ widget.newButton{
 
   onEvent = function(event)
     if event.phase == "ended" then
-      local alayer = {}
-
-      for row, edges in pairs(RowInfo) do
-        local r0 = (row - 1) * NCols
-
-        for col = edges.left, edges.right do
-          alayer[r0 + col] = .25
-        end
-      end
-
-      local layers = {}
-
+      local nn=0
       for _, density in ipairs(Densities) do
-        local layer = {}
-
         for row, edges in pairs(RowInfo) do
           for col = edges.left, edges.right do
             if random(100) < density then
-              local n, angle, vx, vy, wx, wy = random(2, 6), GetAxes()
-
-              for j = 0, 15 do
-                local t, x, y = j / 16, col * CellWidth, row * CellHeight
-
-                for _ = 1, n do
-                  x, y = RenderSegment(layer, j, x, y, Slerp(vx, vy, wx, wy, angle, t))
-                  t = random(j * 2, j * 3 + 5) / 50 -- slightly shifted
-                end
+              local angle, vx, vy, wx, wy = GetAxes(col, edges.left, edges.right)
+              local hair = {
+                angle = angle,
+                dx = random(-2, 2),
+                dy = random(-2, 2),
+                vx = vx, vy = vy,
+                wx = wx, wy = wy,
+                row = row, col = col,
+                r = random(), g = random(), b = random(),
+                speed = random(5, 8) / 5,
+                t = 0
+              }
+              nn=nn+1
+              local n = random(3, 5)
+              local R, G, B = .7, .3, .2
+              
+              for i = 1, n do
+                hair[i] = display.newRect(0, 0, WW, WW)
+              --  hair[i].alpha=.6
+                
+                local tb = (i - 1) / n
+                local tt = i / n
+                hair[i].blendMode="screen"
+              --  hair[i]:setFillColor(.7, .3, .2)
+                local sb = 1 - tb * .9
+                local st = 1 - tt * .9
+              
+                hair[i]:setFillVertexColor(1, R, G, B, st)--R * st, G * st, B * st)
+                hair[i]:setFillVertexColor(4, R, G, B, st)--, R * st, G * st, B * st)
+                hair[i]:setFillVertexColor(2, R, G, B, sb)--, R * sb, G * sb, B * sb)
+                hair[i]:setFillVertexColor(3, R, G, B, sb)--, R * sb, G * sb, B * sb)
+                -- 1, 4: top color
+                -- 2, 3: bottom
               end
+              
+              Hairs[#Hairs + 1] = hair
             end
           end
         end
-    
-        layers[#layers + 1] = layer
       end
-
-      layers[#layers + 1] = alayer
-
-      BakeLayers(layers)
     end
   end
 }
 
---
---
---
+local function GetDisp (ex, ey, cx, cy)
+  return cx - ex, cy - ey
+end
 
-local Image2 = display.newImageRect(Tex2.filename, Tex2.baseDir, 200, 200)
+local I, N = 0, 7
 
-Image2:setStrokeColor(1, 0, 0)
+timer.performWithDelay(75, function(event)
+  local ibounds = Image.contentBounds
+  
+  for i = I + 1, #Hairs, N do
+    local hair = Hairs[i]
 
-Image2.anchorX, Image2.x = 0, Left
-Image2.anchorY, Image2.y = 0, Top + 450
-Image2.strokeWidth = 2
+    display.remove(hair.line)
 
---
---
---
+    local x1, y1 = ibounds.xMin + hair.col * CellWidth + hair.dx, ibounds.yMin + hair.row * CellHeight + hair.dy
 
-graphics.defineEffect{
-  category = "filter", name = "fur",
+    local n = #hair
+    local w1 = 2
+    local w2 = .5
 
-  vertexData = {
-    { index = 0, name = "t1", min = 0, max = 1, default = 0 },
-    { index = 1, name = "t2", min = 0, max = 1, default = 0 },
-    { index = 2, name = "t3", min = 0, max = 1, default = 0 },
-  },
+    local lx1, ly1 = x1 - w1 / 2, y1
+    local rx1, ry1 = x1 + w1 / 2, y1
 
-  fragment = [[
-    P_COLOR vec4 FragmentKernel (P_UV vec2 uv)
-    {
-      P_COLOR vec4 rgba = texture2D(CoronaSampler0, uv);
-      P_COLOR float blank = step(dot(rgba, rgba), 0.);
+    local t = hair.t
 
-      // Decode the RGB components, into the lower bound of the initial 16ths bin,
-      // plus the range (in 16ths) from there, cf. EncodeTimes() above. The sample
-      // is in 255ths rather than 256ths, so the rounding might be slightly off.
-      P_UV vec3 hoist = rgba.xyz * 16.;
-      P_UV vec3 range = fract(hoist);
-      P_UV vec3 low = (hoist - range) / 16.;
+    for j = 1, n do
+      local tt = t % 2
+      
+      if tt > 1 then
+        tt = 2 - tt
+      end
+      
+      local dx, dy = Slerp(hair.vx, hair.vy, hair.wx, hair.wy, hair.angle, tt)
+      local x2, y2 = x1 + dx * 4.5, y1 + dy * 4.5
+      
+      local mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+      
+      local w = w1 + j * (w2 - w1) / n
+      local nx, ny = -dy * w / 2, dx * w / 2
+      
+      local r = hair[j]
+      
+      local lx2, ly2 = x2 - nx, y2 - ny
+      local rx2, ry2 = x2 + nx, y2 + ny
+      
+      local hpath = r.path
+      
+      r.x, r.y = mx, my
+      
+      hpath.x1, hpath.y1 = GetDisp(mx - WW / 2, my - WW / 2, lx2, ly2)
+      hpath.x2, hpath.y2 = GetDisp(mx - WW / 2, my + WW / 2, lx1, ly1)
+      hpath.x3, hpath.y3 = GetDisp(mx + WW / 2, my + WW / 2, rx1, ry1)
+      hpath.x4, hpath.y4 = GetDisp(mx + WW / 2, my - WW / 2, rx2, ry2)
+      
+      lx1, ly1 = lx2, ly2
+      rx1, ry1 = rx2, ry2
 
-      // See if the time falls within the bounds for each component.
-      P_UV vec3 when = CoronaVertexUserData.xyz - low;
-      P_COLOR vec3 ge_lower = step(vec3(0.), when);
-      P_COLOR vec3 le_upper = step(when, range);
-      P_COLOR vec3 bounded = ge_lower * le_upper;
+      x1, y1 = x2, y2
+      t = t + 8.725 * hair.speed * random()
+    end
+    
+    hair.t = t
+  end
 
-      // Accumulate the tint for any valid component. This is not an especially fancy
-      // blending policy, but always-visible pixels are easy, cf. BakeLayers() above.
-      P_COLOR float fur_tint = rgba.a;//
-    //  dot(bounded, vec3(.125, .375, .25));
-    //  P_COLOR vec4 gray = vec4(rgba.a);
-      P_COLOR float ff = fur_tint;//vec4(rgba.a + fur_tint);
-ff = max(ff, .625 * bounded.r);
-ff = max(ff, .875 * bounded.g);
-ff = max(ff, .925 * bounded.b);
-
-P_COLOR vec4 gray = vec4(ff);
-      // Tint the final grayscale value. If the pixel was hidden, clear anything done.
-      return CoronaColorScale(gray) * (1. - blank);
-    }
-  ]]
-}
-
---
---
---
-
-local Image3 = display.newImageRect(Tex2.filename, Tex2.baseDir, 300, 300)
-
-Image3.fill.effect = "filter.custom.fur"
-
-Image3:setStrokeColor(0, 1, 0)
-
-Image3.anchorX, Image3.x = 0, Left
-Image3.anchorY, Image3.y = 0, Top + 700
-Image3.strokeWidth = 2
-
-Image3:setFillColor(.7, .3, .2) -- vair
-
-transition.to(Image3.fill.effect, { t1 = 1, time = 1300, transition = easing.continuousLoop, iterations = 0 })
-transition.to(Image3.fill.effect, { t2 = 1, time = 2300, transition = easing.continuousLoop, iterations = 0 })
-transition.to(Image3.fill.effect, { t3 = 1, time = 1300, transition = easing.continuousLoop, iterations = 0 })
+  I = (I + 1) % N
+end, 0)
