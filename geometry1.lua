@@ -149,9 +149,21 @@ local function Paint (col, row)
   local info = RowInfo[row]
 
   if info then
-    info.left, info.right = min(col, info.left), max(col, info.right)
+  --  info.left, info.right = min(col, info.left), max(col, info.right)
+    for i = 1, #info do
+      if col <= info[i] then
+        if col < info[i] then
+          table.insert(info, i, col)
+        end
+        
+        return
+      end
+    end
+    
+    info[#info + 1] = col
+
   else
-    RowInfo[row] = { left = col, right = col }
+    RowInfo[row] = { col }--left = col, right = col }
   end
 end
 
@@ -292,12 +304,40 @@ widget.newButton{
 
   onEvent = function(event)
     if event.phase == "ended" then
-      local nn=0
+      for row, edges in pairs(RowInfo) do
+        local left, prev = true, edges[1]
+
+        for i = 2, #edges do
+          local cur = edges[i]
+          
+          if cur ~= prev + 1 then
+            left = not left
+          elseif left then
+            edges[i] = false
+          else
+            edges[i - 1] = false
+          end
+          
+          prev = cur
+        end
+        
+        for i = #edges, 1, -1 do
+          if not edges[i] then
+            table.remove(edges, i)
+          end
+        end
+        
+        if #edges % 2 ~= 0 then
+          table.remove(edges)
+        end
+      end
+      
       for _, density in ipairs(Densities) do
         for row, edges in pairs(RowInfo) do
-          for col = edges.left, edges.right do
+          for ii = 1, #edges, 2 do
+          for col = edges[ii], edges[ii + 1] do--edges.left, edges.right do
             if random(100) < density then
-              local angle, vx, vy, wx, wy = GetAxes(col, edges.left, edges.right)
+              local angle, vx, vy, wx, wy = GetAxes(col, edges[ii], edges[ii + 1])--edges.left, edges.right)
               local hair = {
                 angle = angle,
                 dx = random(-2, 2),
@@ -309,7 +349,7 @@ widget.newButton{
                 speed = random(5, 8) / 5,
                 t = 0
               }
-              nn=nn+1
+ 
               local n = random(3, 5)
               local R, G, B = .7, .3, .2
               
@@ -334,6 +374,7 @@ widget.newButton{
               
               Hairs[#Hairs + 1] = hair
             end
+          end
           end
         end
       end
@@ -374,7 +415,7 @@ timer.performWithDelay(75, function(event)
       end
       
       local dx, dy = Slerp(hair.vx, hair.vy, hair.wx, hair.wy, hair.angle, tt)
-      local x2, y2 = x1 + dx * 4.5, y1 + dy * 4.5
+      local x2, y2 = x1 + dx * 3.5, y1 + dy * 3.5
       
       local mx, my = (x1 + x2) / 2, (y1 + y2) / 2
       
@@ -399,7 +440,7 @@ timer.performWithDelay(75, function(event)
       rx1, ry1 = rx2, ry2
 
       x1, y1 = x2, y2
-      t = t + 8.725 * hair.speed * random()
+      t = t + 2.725 * hair.speed
     end
     
     hair.t = t
