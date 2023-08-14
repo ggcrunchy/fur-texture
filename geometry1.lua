@@ -191,7 +191,7 @@ local Densities = { 80, 75, 90 }
 --
 --
 
-local function DoRows (func)
+local function DoRows (func, group)
   for row, edges in pairs(RowInfo) do
     for i = 1, #edges, 2 do
       local left, right = edges[i], edges[i + 1]
@@ -199,7 +199,7 @@ local function DoRows (func)
       for col = left, right do
         for j = 1, #Densities do
           if random(100) < Densities[j] then
-            func(row, col, left, right)
+            func(group, row, col, left, right)
           end
         end
       end
@@ -221,7 +221,7 @@ local Hairs = {}
 --
 --
 
-local function AddHair (row, col, left, right)
+local function AddHair (group, row, col, left, right)
   local angle, vx, vy, wx, wy = GetAxes(col, left, right)
   local hair = {
     angle = angle,
@@ -237,7 +237,7 @@ local function AddHair (row, col, left, right)
   local n = random(3, 5)
   
   for i = 1, n do
-    hair[i] = display.newRect(0, 0, WW, WW)
+    hair[i] = display.newRect(group, 0, 0, WW, WW)
     
     local tb = (i - 1) / n
     local tt = i / n
@@ -270,10 +270,44 @@ widget.newButton{
   onEvent = function(event)
     if event.phase == "ended" then
       GetIntervals()
-      DoRows(AddHair)
+      DoRows(AddHair, display.getCurrentStage())
     end
   end
 }
+
+--
+--
+--
+
+local Snapshot
+
+widget.newButton{
+  left = Image.contentBounds.xMax + 20,
+  top = Image.contentBounds.yMin + 60,
+  label = "Build -> Snapshot",
+
+  onEvent = function(event)
+    if event.phase == "ended" then
+      local snapshot = display.newSnapshot(Image.contentWidth, Image.contentHeight)
+
+      snapshot:scale(.45, .45)
+      snapshot:setStrokeColor(0, 0, 1)
+
+      snapshot.strokeWidth = 2
+      snapshot.x = Image.contentBounds.xMax + 125
+      snapshot.y = Image.contentBounds.yMin + 225
+
+      Snapshot = snapshot
+
+      GetIntervals()
+      DoRows(AddHair, snapshot.group)
+    end
+  end
+}
+
+--
+--
+--
 
 local function GetDisp (ex, ey, cx, cy)
   return cx - ex, cy - ey
@@ -295,14 +329,20 @@ local MaxWidth, MinWidth = 2, .5
 local HairPartLength = 3.5
 
 timer.performWithDelay(75, function()
-  local ibounds = Image.contentBounds
-  
+  local ibounds, x0, y0 = Image.contentBounds
+
+  if Snapshot then
+    x0, y0 = -Image.contentWidth / 2, -Image.contentHeight / 2
+  else
+    x0, y0 = ibounds.xMin, ibounds.yMin
+  end
+
   for i = I + 1, #Hairs, N do
     local hair = Hairs[i]
 
     display.remove(hair.line)
 
-    local x1, y1 = ibounds.xMin + hair.col * CellWidth + hair.dx, ibounds.yMin + hair.row * CellHeight + hair.dy
+    local x1, y1 = x0 + hair.col * CellWidth + hair.dx, y0 + hair.row * CellHeight + hair.dy
 
     local n = #hair
 
@@ -342,6 +382,10 @@ timer.performWithDelay(75, function()
     end
     
     hair.t = t
+  end
+
+  if Snapshot then
+    Snapshot:invalidate()
   end
 
   I = (I + 1) % N
